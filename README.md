@@ -1,196 +1,110 @@
 # Flash Deal Reservation API 🚀
 
-A production-ready backend REST API that allows users to reserve limited-stock products during flash sale events — **without overselling**, even under high concurrency.
+A high-concurrency backend REST API designed for flash sale scenarios. It ensures atomic product reservations using Redis Lua scripts and PostgreSQL, preventing overselling even under extreme load.
 
 ---
 
-## Tech Stack
+## 🛠 Tech Stack
 
-| Layer | Technology | Why |
-|---|---|---|
-| Runtime | Node.js + TypeScript | Type safety, performance |
-| Framework | Express.js | Minimal, battle-tested |
-| Database | **PostgreSQL** via Prisma ORM | Relational, ACID transactions, permanent records |
-| Cache / Locks | **Redis** (ioredis) | Sub-millisecond atomic operations via Lua scripts |
-| Validation | Zod | Schema-first, compile-time safe |
-| API Docs | Swagger UI | Auto-generated from JSDoc |
-| Rate Limiting | express-rate-limit | Abuse prevention |
-| Dev Infra | Docker Compose | Zero-friction local setup |
+| Layer | Technology | Rationale |
+| :--- | :--- | :--- |
+| **Runtime** | Node.js + TypeScript | High performance with robust type safety. |
+| **Framework** | Express.js | Lightweight and flexible for building fast REST APIs. |
+| **Database** | **PostgreSQL** via Prisma | Reliable persistence with ACID transactions for orders. |
+| **Cache/Concurrency** | **Redis** (ioredis) | Sub-millisecond atomic locks using optimized Lua scripts. |
+| **Validation** | Zod | Runtime schema validation with compile-time type inference. |
+| **Documentation** | Swagger UI | Standardized API documentation and testing interface. |
+| **Security** | Helmet + Rate Limit | Protection against common web vulnerabilities and brute force. |
 
 ---
 
-## How to Start the Project
+## 🚀 How to Start
 
 ### Prerequisites
-- [Docker](https://docker.com) & Docker Compose
-- Node.js 18+
+- [Docker](https://www.docker.com/) & Docker Compose
+- Node.js (v18+)
 
 ### Quick Start
+1. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
+2. **Setup Environment**:
+   ```bash
+   cp .env.example .env
+   ```
+3. **Spin up Infrastructure**:
+   ```bash
+   docker compose up -d
+   ```
+4. **Initialize Database**:
+   ```bash
+   npm run setup
+   ```
+5. **Run the App**:
+   ```bash
+   npm run dev
+   ```
 
-```bash
-# 1. Clone the repo & install dependencies
-npm install
-
-# 2. Copy env file
-cp .env.example .env
-
-# 3. Start PostgreSQL + Redis containers
-docker compose up -d
-
-# 4. Generate Prisma client & push DB schema
-npx prisma generate
-npx prisma db push
-
-# 5. Start the development server
-npm run dev
-```
-
-The API is now running at **http://localhost:3000**  
-Swagger Docs: **http://localhost:3000/api-docs**
-
-### Available Scripts
-
-| Command | Description |
-|---|---|
-| `npm run dev` | Start with hot-reload (ts-node-dev) |
-| `npm run build` | Compile TypeScript to `dist/` |
-| `npm start` | Run compiled build |
-| `npm run db:push` | Sync Prisma schema to DB |
-| `npm run db:studio` | Open Prisma Studio (DB GUI) |
-| `npm run stress-test` | Run concurrency stress test |
+The API will be available at [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## How the Reservation Lock Works
+## 🔒 Reservation Lock Logic
 
-```
-User → POST /api/reservations/reserve
-         │
-         ▼
-  ┌──────────────────────────────────────┐
-  │  Redis Lua Script (ATOMIC)           │
-  │                                      │
-  │  1. GET product:{id}:stock           │
-  │  2. IF stock >= qty THEN             │
-  │     DECRBY product:{id}:stock qty    │
-  │     SET reservation:{userId}:{pid}   │
-  │         <payload> EX 600             │
-  │  3. ELSE return -1 (out of stock)    │
-  └──────────────────────────────────────┘
-         │
-         ▼
-  Prisma: INSERT Reservation (status=ACTIVE)
-```
+The core of the system lies in **Atomic Operations**. When a user attempts to reserve an item:
 
-Because the Lua script executes **atomically** in Redis (single-threaded), two concurrent users can never both pass the stock check for the same units. This **completely prevents overselling** even under thousands of simultaneous requests.
+1.  **Lua Script Execution**: A pre-loaded Lua script (`reserve_batch.lua`) is called via `EVALSHA`.
+2.  **Isolated Check**: Inside Redis, the script checks if:
+    -   The user already has an active reservation for that product.
+    -   There is sufficient stock available in the Redis stock key.
+3.  **Atomic Update**: If checks pass, Redis decrements the stock and creates a reservation key with a TTL in a single atomic step.
+4.  **Database Sync**: Once Redis confirms the lock, the `ReservationService` records the active reservation in PostgreSQL for permanent tracking.
 
-### Multi-SKU Reservation with Rollback
-
-When reserving multiple products in one request, the service iterates through items and runs the atomic Lua script per item. If *any* item fails (e.g., insufficient stock for item 3), all previously locked items are released using a compensating `releaseLua` script — like a distributed rollback.
+This dual-layer approach ensures that **no two requests can ever claim the same unit of stock**, resolving race conditions at the cache layer.
 
 ---
 
-## How Expiry Works
+## ⏳ How Expiration Works
 
-Redis keys have a **600-second (10 minute) TTL** set at reservation time:
+Reservations are temporary (default: 10 minutes). The cleanup is automated via **Redis Keyspace Notifications**:
 
-```
-reservation:{userId}:{productId}  →  expires in 600s
-```
+1.  **TTL Expiry**: When a reservation key `reservation:{userId}:{productId}` expires in Redis.
+2.  **Event Notification**: Redis emits an `expired` event.
+3.  **Active Listener**: A dedicated listener in `src/config/redis.ts` catches the event.
+4.  **Automatic Restoration**: The system automatically:
+    -   Increments the product stock back in Redis.
+    -   Updates the database record status to `EXPIRED`.
 
-When a key expires:
-1. Redis emits a **keyspace notification** on the `__keyevent@0__:expired` channel
-2. Our subscriber listens, parses the expired key name to extract `userId` and `productId`
-3. The `handleReservationExpiry()` function:
-   - Restores the quantity to the Redis stock key (`INCRBY`)
-   - Updates the DB `Reservation` record to `status = EXPIRED`
-
-This means **no background job / cron is needed** — Redis itself triggers the expiry logic.
-
-> For testing, set `RESERVATION_TTL_SECONDS=30` in `.env` to use a 30-second TTL.
+This eliminates the need for expensive background cron jobs or polling mechanisms.
 
 ---
 
-## API Endpoints
+## 📖 API Documentation
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/products` | Create product with initial stock |
-| `GET` | `/api/products/:id/status` | Get total / reserved / available stock |
-| `POST` | `/api/reservations/reserve` | Reserve 1+ items (10-min lock) |
-| `POST` | `/api/reservations/checkout` | Finalize purchase → permanent DB order |
-| `DELETE` | `/api/reservations/:productId` | Cancel reservation early |
-| `GET` | `/health` | Health check |
-| `GET` | `/api-docs` | Swagger UI |
+The API comes with built-in Swagger documentation for easy exploration and testing.
 
----
+-   **Swagger UI**: [http://localhost:3000/api-docs](http://localhost:3000/api-docs)
+-   **Health Check**: [http://localhost:3000/health](http://localhost:3000/health)
 
-## Example: Happy Path
-
-```bash
-# 1. Create product (100 units at $49.99)
-curl -X POST http://localhost:3000/api/products \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Flash Sneakers","totalStock":100,"price":49.99}'
-
-# 2. Reserve 3 units for user alice
-curl -X POST http://localhost:3000/api/reservations/reserve \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"alice","items":[{"productId":"<id>","quantity":3}]}'
-
-# 3. Check stock → available: 97, reserved: 3
-curl http://localhost:3000/api/products/<id>/status
-
-# 4. Checkout
-curl -X POST http://localhost:3000/api/reservations/checkout \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"alice","items":[{"productId":"<id>","quantity":3}]}'
-
-# 5. Cancel a reservation (before checkout)
-curl -X DELETE http://localhost:3000/api/reservations/<productId> \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"alice"}'
-```
+### Key Endpoints
+- `POST /api/products`: Create a product and seed its stock.
+- `GET /api/products/:id/status`: View live stock and reservation stats.
+- `POST /api/reservations/reserve`: Atomically reserve items.
+- `POST /api/reservations/checkout`: Convert reservations into permanent orders.
+- `DELETE /api/reservations/:productId`: Manually release a reservation.
 
 ---
 
-## Concurrency Stress Test
+## 📂 Project Structure
 
-```bash
-npm run stress-test
-```
-
-Creates a product with **5 units**, fires **50 concurrent** reservation requests, and asserts exactly 5 succeed (45 fail with `409 Insufficient stock`).
-
----
-
-## Project Structure
-
-```
+```text
 src/
-├── config/          # prisma.ts, redis.ts — singleton clients
-├── controllers/     # Thin HTTP layer only — no business logic
-├── services/        # All business logic (product + reservation)
-├── routes/          # Express routers with Swagger JSDoc
-├── middlewares/     # validate.ts, errorHandler.ts, rateLimiter.ts
-├── validators/      # Zod schemas
-├── scripts/         # Lua scripts (reserve.lua, release.lua, checkout.lua)
-└── index.ts         # App entry point
-prisma/
-└── schema.prisma    # DB models: Product, Order, Reservation
+├── config/       # App constants and service initializers (Redis, Prisma)
+├── controllers/  # Request handlers and response formatting
+├── repositories/ # Standardized database abstraction layer (Prisma)
+├── services/     # Core business logic and Redis management
+├── routes/       # API route definitions and Swagger JSDoc
+├── scripts/      # High-performance Lua scripts for Redis
+└── utils/        # Generic utilities like structured logging
 ```
-
----
-
-## Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `3000` | Server port |
-| `DATABASE_URL` | — | PostgreSQL connection string |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection string |
-| `RESERVATION_TTL_SECONDS` | `600` | Reservation lock duration (seconds) |
-| `RATE_LIMIT_MAX_REQUESTS` | `60` | Max requests per window per IP |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window (ms) |
-# assement-test
-# assement-test

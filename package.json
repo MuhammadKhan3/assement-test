@@ -12,8 +12,7 @@
     "db:migrate:prod": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:status": "prisma migrate status",
-    "setup": "docker compose up -d && sleep 5 && npm run db:migrate && npm run db:generate",
-    "stress-test": "ts-node scripts/stress-test.ts"
+    "setup": "docker compose up -d && sleep 5 && npm run db:migrate && npm run db:generate"
   },
   "keywords": [
     "flash-sale",
