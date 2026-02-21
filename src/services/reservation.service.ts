@@ -1,9 +1,10 @@
-import { ReservationStatus } from "@prisma/client";
+import { ReservationStatus, Prisma } from "@prisma/client";
 import { prisma } from "../db/prisma";
 import { ProductRepository } from "../repositories/product.repository";
 import { ReservationRepository } from "../repositories/reservation.repository";
 import { RedisManagerService } from "./redis-manager.service";
 import { NotFoundError, ConflictError, BadRequestError } from "../types/errors";
+import { CONFIG } from "../config/config";
 
 interface ReservationItem {
     productId: string;
@@ -11,64 +12,29 @@ interface ReservationItem {
 }
 
 export class ReservationService {
-    private productRepository: ProductRepository;
-    private reservationRepository: ReservationRepository;
-    private redisManager: RedisManagerService;
-
-    constructor() {
-        this.productRepository = new ProductRepository();
-        this.reservationRepository = new ReservationRepository();
-        this.redisManager = new RedisManagerService();
-    }
+    private readonly productRepository = new ProductRepository();
+    private readonly reservationRepository = new ReservationRepository();
+    private readonly redisManager = new RedisManagerService();
 
     /**
-     * Reserve one or more products atomically (multi-SKU batch).
-     * Uses a single Lua script for true atomicity across all items.
+     * Reserve one or more products atomically.
      */
     async reserveItems(userId: string, items: ReservationItem[]) {
-        // Validate all products exist
-        const productIds = items.map((i) => i.productId);
+        const productIds = items.map(i => i.productId);
         const products = await this.productRepository.getAllByIds(productIds);
 
-        if (products.length !== productIds.length) {
-            const foundIds = new Set(products.map((p: any) => p.id));
-            const missing = productIds.filter((id) => !foundIds.has(id));
-            throw new NotFoundError(`Products not found: ${missing.join(", ")}`);
-        }
-
-        // Ensure all Redis stock keys are seeded
+        this.validateProductsExist(productIds, products);
         await this.redisManager.ensureStockKeys(products);
 
-        const ttlSeconds = parseInt(process.env.RESERVATION_TTL_SECONDS || "600", 10);
-        const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+        const ttl = CONFIG.RESERVATION.TTL_SECONDS;
+        const expiresAt = new Date(Date.now() + ttl * 1000);
+        const batchData = this.prepareRedisBatch(userId, items, expiresAt);
 
-        // Prepare batch data
-        const batchItems = items.map((item) => ({
-            productId: item.productId,
-            quantity: item.quantity,
-            payload: JSON.stringify({
-                userId,
-                productId: item.productId,
-                qty: item.quantity,
-                expiresAt: expiresAt.toISOString(),
-            }),
-        }));
+        const result = await this.redisManager.reserveBatch(userId, batchData);
+        this.handleRedisReservationResult(result);
 
-        // Atomic batch reservation in Redis
-        const result = await this.redisManager.reserveBatch(userId, batchItems);
-
-        if (result === -2) {
-            throw new ConflictError(
-                "One or more products already have an active reservation for this user."
-            );
-        }
-        if (result === -1) {
-            throw new ConflictError("Insufficient stock for one or more products.");
-        }
-
-        // Bulk write audit records to DB
         await this.reservationRepository.createMany(
-            items.map((item) => ({
+            items.map(item => ({
                 userId,
                 productId: item.productId,
                 quantity: item.quantity,
@@ -81,8 +47,8 @@ export class ReservationService {
             userId,
             items,
             expiresAt,
-            ttlSeconds,
-            message: `${items.length} item(s) reserved for ${ttlSeconds / 60} minutes.`,
+            ttlSeconds: ttl,
+            message: `${items.length} item(s) reserved for ${ttl / 60} minutes.`,
         };
     }
 
@@ -94,7 +60,6 @@ export class ReservationService {
         if (!product) throw new NotFoundError("Product");
 
         const restoredQty = await this.redisManager.release(userId, productId);
-
         if (restoredQty === 0) {
             throw new NotFoundError("Active reservation for this product");
         }
@@ -108,78 +73,107 @@ export class ReservationService {
     }
 
     /**
-     * Checkout — finalize purchase.
+     * Checkout reserved items.
      */
     async checkout(userId: string, items: ReservationItem[]) {
-        const completedItems: { productId: string; quantity: number; totalPrice: number }[] = [];
+        const results = await prisma.$transaction(async (tx) => {
+            const processedItems = [];
 
-        await prisma.$transaction(async (tx) => {
             for (const item of items) {
-                const reservedQty = await this.redisManager.checkout(userId, item.productId);
-
-                if (reservedQty === 0) {
-                    throw new BadRequestError(
-                        `No active reservation found for product ${item.productId}. It may have expired.`
-                    );
-                }
-
-                if (reservedQty !== item.quantity) {
-                    await this.redisManager.incrStock(item.productId, reservedQty);
-                    throw new BadRequestError(
-                        `Quantity mismatch for product ${item.productId}. Reserved: ${reservedQty}, requested: ${item.quantity}.`
-                    );
-                }
-
-                // Permanently decrement stock in DB
-                const product = await tx.product.update({
-                    where: { id: item.productId },
-                    data: { totalStock: { decrement: item.quantity } },
-                });
-
-                const itemTotal = Number(product.price) * item.quantity;
-
-                await tx.order.create({
-                    data: {
-                        userId,
-                        productId: item.productId,
-                        quantity: item.quantity,
-                        totalPrice: itemTotal,
-                    },
-                });
-
-                await tx.reservation.updateMany({
-                    where: { userId, productId: item.productId, status: ReservationStatus.ACTIVE },
-                    data: { status: ReservationStatus.COMPLETED, updatedAt: new Date() },
-                });
-
-                completedItems.push({ productId: item.productId, quantity: item.quantity, totalPrice: itemTotal });
+                const result = await this.processCheckoutItem(tx, userId, item);
+                processedItems.push(result);
             }
-        });
 
-        const grandTotal = completedItems.reduce((sum, i) => sum + i.totalPrice, 0);
+            return processedItems;
+        });
 
         return {
             message: "Checkout successful. Order placed.",
             userId,
-            items: completedItems,
-            grandTotal: parseFloat(grandTotal.toFixed(2)),
+            items: results,
+            grandTotal: parseFloat(results.reduce((sum, i) => sum + i.totalPrice, 0).toFixed(2)),
             orderedAt: new Date().toISOString(),
         };
     }
 
     /**
-     * Expiry handler (called by Redis listener).
+     * Handles reservation expiration (called by Redis listener).
      */
     async handleReservationExpiry(userId: string, productId: string) {
         console.log(`🕐 Reservation expired: user=${userId} product=${productId}`);
 
         const reservation = await this.reservationRepository.findActive(userId, productId);
-
         if (reservation) {
             await this.redisManager.incrStock(productId, reservation.quantity);
             console.log(`♻️  Restored ${reservation.quantity} units to product ${productId}`);
         }
 
         await this.reservationRepository.markStatus(userId, productId, ReservationStatus.EXPIRED);
+    }
+
+    /* ********************************************************** */
+    /* ********************* PRIVATE HELPERS ******************** */
+    /* ********************************************************** */
+
+    private validateProductsExist(requestedIds: string[], foundProducts: any[]) {
+        if (foundProducts.length === requestedIds.length) return;
+
+        const foundIds = new Set(foundProducts.map(p => p.id));
+        const missing = requestedIds.filter(id => !foundIds.has(id));
+        throw new NotFoundError(`Products not found: ${missing.join(", ")}`);
+    }
+
+    private prepareRedisBatch(userId: string, items: ReservationItem[], expiresAt: Date) {
+        return items.map(item => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            payload: JSON.stringify({
+                userId,
+                productId: item.productId,
+                qty: item.quantity,
+                expiresAt: expiresAt.toISOString(),
+            }),
+        }));
+    }
+
+    private handleRedisReservationResult(result: number) {
+        if (result === -2) {
+            throw new ConflictError("One or more products already have an active reservation for this user.");
+        }
+        if (result === -1) {
+            throw new ConflictError("Insufficient stock for one or more products.");
+        }
+    }
+
+    private async processCheckoutItem(tx: Prisma.TransactionClient, userId: string, item: ReservationItem) {
+        const reservedQty = await this.redisManager.checkout(userId, item.productId);
+
+        if (reservedQty === 0) {
+            throw new BadRequestError(`No active reservation for product ${item.productId}.`);
+        }
+
+        if (reservedQty !== item.quantity) {
+            // Revert Redis stock if check-out fails due to quantity mismatch
+            await this.redisManager.incrStock(item.productId, reservedQty);
+            throw new BadRequestError(`Quantity mismatch for product ${item.productId}.`);
+        }
+
+        const product = await tx.product.update({
+            where: { id: item.productId },
+            data: { totalStock: { decrement: item.quantity } },
+        });
+
+        const totalPrice = Number(product.price) * item.quantity;
+
+        await tx.order.create({
+            data: { userId, productId: item.productId, quantity: item.quantity, totalPrice },
+        });
+
+        await tx.reservation.updateMany({
+            where: { userId, productId: item.productId, status: ReservationStatus.ACTIVE },
+            data: { status: ReservationStatus.COMPLETED, updatedAt: new Date() },
+        });
+
+        return { productId: item.productId, quantity: item.quantity, totalPrice };
     }
 }

@@ -1,12 +1,14 @@
 /**
- * Logs an error with a consistent format.
+ * Logs an error with a consistent, structured format.
  */
 export function logError(error: unknown, context?: string): void {
-    const prefix = context ? `[${context}]` : "[Error]";
+    const timestamp = new Date().toISOString();
+    const prefix = context ? `[${context}]` : "[ERROR]";
+
     if (error instanceof Error) {
-        console.error(`${prefix} ${error.message}`, error.stack);
+        console.error(`\n--- ${timestamp} ${prefix} ---\nMessage: ${error.message}\nStack: ${error.stack}\n`);
     } else {
-        console.error(`${prefix}`, error);
+        console.error(`\n--- ${timestamp} ${prefix} ---\nDetails:`, error, "\n");
     }
 }
 

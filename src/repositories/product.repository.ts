@@ -7,6 +7,6 @@ export class ProductRepository extends Repository {
     }
 
     async findByName(name: string) {
-        return this.getBy("name", name);
+        return this.get({ where: { name } });
     }
 }
