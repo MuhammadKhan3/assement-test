@@ -1,0 +1,203 @@
+{
+  "info": {
+    "_postman_id": "flash-deal-api-collection",
+    "name": "Flash Deal Reservation API",
+    "description": "Complete Postman collection for the Flash Deal Reservation API. Tests product creation, stock reservation, checkout, and cancellation.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "productId", "value": "", "type": "string" },
+    { "key": "userId", "value": "user-alice-001", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health",
+        "description": "Verify the server is running"
+      }
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "Create Product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data && res.data.id) {",
+                  "  pm.collectionVariables.set('productId', res.data.id);",
+                  "  console.log('Product ID saved:', res.data.id);",
+                  "}",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has product id', () => pm.expect(res.data.id).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/products",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Limited Edition Flash Sneakers\",\n  \"description\": \"Only 200 units available – flash sale exclusive!\",\n  \"totalStock\": 200,\n  \"price\": 149.99\n}"
+            },
+            "description": "Creates a new product with initial stock. Automatically saves productId to collection variable."
+          }
+        },
+        {
+          "name": "Get Product Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Has stock fields', () => {",
+                  "  pm.expect(res.data).to.have.property('totalStock');",
+                  "  pm.expect(res.data).to.have.property('reservedStock');",
+                  "  pm.expect(res.data).to.have.property('availableStock');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/products/{{productId}}/status",
+            "description": "Returns total stock, reserved stock, and available stock in real-time."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reservations",
+      "item": [
+        {
+          "name": "Reserve Items (Single SKU)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const res = pm.response.json();",
+                  "pm.test('Reservation created', () => pm.expect(res.success).to.be.true);",
+                  "pm.test('Has expiresAt', () => pm.expect(res.data.expiresAt).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/reservations/reserve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 2\n    }\n  ]\n}"
+            },
+            "description": "Reserves 2 units of the product for the user. Stock is locked for 10 minutes (RESERVATION_TTL_SECONDS)."
+          }
+        },
+        {
+          "name": "Reserve Items (Multi-SKU)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/reservations/reserve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-bob-002\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 1\n    },\n    {\n      \"productId\": \"<second-product-id>\",\n      \"quantity\": 3\n    }\n  ]\n}"
+            },
+            "description": "Reserve multiple products in one atomic request. If any item fails, all others are rolled back."
+          }
+        },
+        {
+          "name": "Checkout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Checkout success', () => pm.expect(res.success).to.be.true);",
+                  "pm.test('Has grandTotal', () => pm.expect(res.data.grandTotal).to.be.a('number'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/reservations/checkout",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 2\n    }\n  ]\n}"
+            },
+            "description": "Finalizes the purchase. Removes Redis reservation key and permanently decrements stock in PostgreSQL. Creates an Order record."
+          }
+        },
+        {
+          "name": "Cancel Reservation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Cancellation success', () => pm.expect(res.success).to.be.true);",
+                  "pm.test('Stock restored', () => pm.expect(res.data.restoredQuantity).to.be.a('number'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/reservations/{{productId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\"\n}"
+            },
+            "description": "Cancels an active reservation early. Stock is returned to the available pool immediately."
+          }
+        },
+        {
+          "name": "Reserve — Expect 409 (Insufficient Stock)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/reservations/reserve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"oversell-tester\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 9999\n    }\n  ]\n}"
+            },
+            "description": "Should return 409 Conflict — demonstrates overselling prevention."
+          }
+        },
+        {
+          "name": "Reserve — Expect 400 (Validation Error)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/reservations/reserve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"\",\n  \"items\": []\n}"
+            },
+            "description": "Should return 400 Validation failed — demonstrates Zod validation."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Product {
+  id           String        @id @default(uuid())
+  name         String
+  description  String?
+  totalStock   Int           @map("total_stock")
+  price        Decimal       @db.Decimal(10, 2)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  orders       Order[]
+  reservations Reservation[]
+
+  @@map("products")
+}
+
+model Order {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  productId  String   @map("product_id")
+  quantity   Int
+  totalPrice Decimal  @db.Decimal(10, 2) @map("total_price")
+  createdAt  DateTime @default(now()) @map("created_at")
+  product    Product  @relation(fields: [productId], references: [id])
+
+  @@index([userId])
+  @@index([productId])
+  @@map("orders")
+}
+
+model Reservation {
+  id        String            @id @default(uuid())
+  userId    String            @map("user_id")
+  productId String            @map("product_id")
+  quantity  Int
+  status    ReservationStatus @default(ACTIVE)
+  expiresAt DateTime          @map("expires_at")
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+  product   Product           @relation(fields: [productId], references: [id])
+
+  @@index([userId, productId])
+  @@index([status])
+  @@map("reservations")
+}
+
+enum ReservationStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  COMPLETED
+}
