@@ -25,6 +25,9 @@ Backend REST API for flash sale scenarios. It ensures atomic product reservation
 - Node.js (v18+)
 
 ### Quick Start
+> [!IMPORTANT]
+> To start the project, you must first create a `.env` file using the provided `.env.example` template.
+
 1. **Install Dependencies**:
    ```bash
    npm install
