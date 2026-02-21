@@ -100,20 +100,18 @@ export class ReservationService {
      * Handles reservation expiration (called by Redis listener).
      */
     async handleReservationExpiry(userId: string, productId: string) {
-        console.log(`🕐 Reservation expired: user=${userId} product=${productId}`);
+        console.log(`Reservation expired: user=${userId} product=${productId}`);
 
         const reservation = await this.reservationRepository.findActive(userId, productId);
         if (reservation) {
             await this.redisManager.incrStock(productId, reservation.quantity);
-            console.log(`♻️  Restored ${reservation.quantity} units to product ${productId}`);
+            console.log(`Restored ${reservation.quantity} units to product ${productId}`);
         }
 
         await this.reservationRepository.markStatus(userId, productId, ReservationStatus.EXPIRED);
     }
 
-    /* ********************************************************** */
-    /* ********************* PRIVATE HELPERS ******************** */
-    /* ********************************************************** */
+    // --- Private Helpers ---
 
     private validateProductsExist(requestedIds: string[], foundProducts: any[]) {
         if (foundProducts.length === requestedIds.length) return;

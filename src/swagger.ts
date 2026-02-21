@@ -9,10 +9,10 @@ const options: swaggerJsdoc.Options = {
             title: "Flash Deal Reservation API",
             version: "1.0.0",
             description:
-                "Backend API for managing limited-stock product reservations during flash sales. " +
-                "Uses Redis atomic locks to prevent overselling and PostgreSQL for permanent order records.",
+                "API for managing limited-stock product reservations during flash sales. " +
+                "Uses Redis for atomic operations and PostgreSQL for permanent records.",
             contact: {
-                name: "Flash Deal API",
+                name: "Support",
             },
         },
         servers: [
@@ -70,5 +70,5 @@ export function setupSwagger(app: Express): void {
         customSiteTitle: "Flash Deal API Docs",
     }));
     app.get("/api-docs.json", (_req, res) => res.json(spec));
-    console.log("📄 Swagger UI available at http://localhost:" + (process.env.PORT || 3000) + "/api-docs");
+    console.log("Swagger UI available at http://localhost:" + (process.env.PORT || 3000) + "/api-docs");
 }

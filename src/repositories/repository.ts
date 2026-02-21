@@ -18,9 +18,7 @@ export class Repository {
         this.model = prisma[modelName as keyof typeof prisma];
     }
 
-    /* ********************************************************** */
-    /* ************************** READ ************************** */
-    /* ********************************************************** */
+    // --- Read ---
 
     async get(args: RepositoryArgs = {}) {
         return this.model.findFirst(args);
@@ -81,9 +79,7 @@ export class Repository {
         return count > 0;
     }
 
-    /* ********************************************************** */
-    /* ************************* CREATE ************************* */
-    /* ********************************************************** */
+    // --- Create ---
 
     async create(data: unknown, args: Partial<RepositoryArgs> = {}) {
         return this.model.create({ data, ...args });
@@ -93,9 +89,7 @@ export class Repository {
         return this.model.createMany({ data, skipDuplicates: true });
     }
 
-    /* ********************************************************** */
-    /* ************************* UPDATE ************************* */
-    /* ********************************************************** */
+    // --- Update ---
 
     async update(id: string, data: unknown) {
         return this.model.update({ where: { id }, data });
@@ -113,9 +107,7 @@ export class Repository {
         });
     }
 
-    /* ********************************************************** */
-    /* ************************* DELETE ************************* */
-    /* ********************************************************** */
+    // --- Delete ---
 
     async delete(id: string) {
         return this.model.delete({ where: { id } });
@@ -125,9 +117,7 @@ export class Repository {
         return this.model.deleteMany({ where });
     }
 
-    /* ********************************************************** */
-    /* ************************* CUSTOM ************************* */
-    /* ********************************************************** */
+    // --- Custom ---
 
     async groupBy(args: any) {
         return this.model.groupBy(args);

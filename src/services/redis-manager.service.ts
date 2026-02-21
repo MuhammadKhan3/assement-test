@@ -6,7 +6,6 @@ import { logError } from "../utils/general";
 
 /**
  * Manages Redis operations for stock and reservations.
- * Uses Pre-loaded Lua scripts for high performance.
  */
 export class RedisManagerService {
     private static scriptShas: Record<string, string> = {};
@@ -46,9 +45,7 @@ export class RedisManagerService {
         return await redis.eval(content, keys.length, ...keys, ...args) as number;
     }
 
-    /* ********************************************************** */
-    /* *********************** KEY HELPERS ********************** */
-    /* ********************************************************** */
+    // --- Key Helpers ---
 
     static getStockKey(productId: string) {
         return `product:${productId}:stock`;
@@ -58,9 +55,7 @@ export class RedisManagerService {
         return `reservation:${userId}:${productId}`;
     }
 
-    /* ********************************************************** */
-    /* ******************** STOCK MANAGEMENT ******************** */
-    /* ********************************************************** */
+    // --- Stock Management ---
 
     async setStock(productId: string, quantity: number) {
         return redis.set(RedisManagerService.getStockKey(productId), quantity);
@@ -83,9 +78,7 @@ export class RedisManagerService {
         await pipeline.exec();
     }
 
-    /* ********************************************************** */
-    /* ***************** RESERVATION MANAGEMENT ***************** */
-    /* ********************************************************** */
+    // --- Reservation Management ---
 
     async reserve(userId: string, productId: string, quantity: number, payload: string) {
         const keys = [
@@ -122,9 +115,7 @@ export class RedisManagerService {
         return this.callScript("checkout", keys, []);
     }
 
-    /* ********************************************************** */
-    /* ***************** SCANNERS & ANALYTICS ******************* */
-    /* ********************************************************** */
+    // --- Scanners & Analytics ---
 
     async getReservedQuantity(productId: string): Promise<number> {
         const pattern = `reservation:*:${productId}`;

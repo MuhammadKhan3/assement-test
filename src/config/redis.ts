@@ -15,13 +15,13 @@ export const redisSub = new Redis(REDIS_URL, {
     lazyConnect: false,
 });
 
-redis.on("connect", () => console.log("✅ Redis connected"));
-redis.on("error", (err: Error) => console.error("❌ Redis error:", err.message));
+redis.on("connect", () => console.log("Redis connected"));
+redis.on("error", (err: Error) => console.error("Redis error:", err.message));
 
 // Subscribe to keyspace expiry events on db 0
 redisSub.on("ready", async () => {
     await redisSub.subscribe("__keyevent@0__:expired");
-    console.log("✅ Redis keyspace subscriber listening for TTL expiry events");
+    console.log("Redis keyspace subscriber listening for TTL expiry events");
 });
 
 redisSub.on("message", (_channel: string, expiredKey: string) => {

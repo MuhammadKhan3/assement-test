@@ -6,9 +6,10 @@ export function logError(error: unknown, context?: string): void {
     const prefix = context ? `[${context}]` : "[ERROR]";
 
     if (error instanceof Error) {
-        console.error(`\n--- ${timestamp} ${prefix} ---\nMessage: ${error.message}\nStack: ${error.stack}\n`);
+        console.error(`${timestamp} ${prefix}: ${error.message}`);
+        if (error.stack) console.error(error.stack);
     } else {
-        console.error(`\n--- ${timestamp} ${prefix} ---\nDetails:`, error, "\n");
+        console.error(`${timestamp} ${prefix}:`, error);
     }
 }
 

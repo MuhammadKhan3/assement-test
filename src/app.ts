@@ -14,33 +14,33 @@ import "./config/redis";
 
 const app = express();
 
-// ── Security & Parsing ───────────────────────────────────────────────────────
+// Security & Parsing
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ── Global Rate Limiter ──────────────────────────────────────────────────────
+// Global Rate Limiter
 app.use(globalRateLimiter);
 
-// ── Health Check ─────────────────────────────────────────────────────────────
+// Health Check
 app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ── Routes ───────────────────────────────────────────────────────────────────
+// Routes
 app.use("/api/products", productRoutes);
 app.use("/api/reservations", reservationRoutes);
 
-// ── Swagger Docs ─────────────────────────────────────────────────────────────
+// Swagger Docs
 setupSwagger(app);
 
-// ── 404 Handler ──────────────────────────────────────────────────────────────
+// 404 Handler
 app.use((_req, res) => {
     res.status(404).json({ success: false, message: "Route not found" });
 });
 
-// ── Global Error Handler ─────────────────────────────────────────────────────
+// Global Error Handler
 app.use(errorHandler);
 
 export default app;
