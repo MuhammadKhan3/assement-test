@@ -193,3 +193,4 @@ prisma/
 | `RATE_LIMIT_MAX_REQUESTS` | `60` | Max requests per window per IP |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window (ms) |
 # assement-test
+# assement-test
