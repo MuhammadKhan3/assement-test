@@ -146,5 +146,3 @@ export class RedisManagerService {
         await pipeline.exec();
     }
 }
-
-export const redisManager = new RedisManagerService();

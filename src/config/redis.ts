@@ -32,8 +32,9 @@ redisSub.on("message", (_channel: string, expiredKey: string) => {
         if (parts.length === 3) {
             const [, userId, productId] = parts;
             // Use dynamic import to avoid circular dependency at module load time
-            import("../services/reservation.service").then(({ handleReservationExpiry }) => {
-                handleReservationExpiry(userId, productId).catch((err: Error) =>
+            import("../services/reservation.service").then(({ ReservationService }) => {
+                const reservationService = new ReservationService();
+                reservationService.handleReservationExpiry(userId, productId).catch((err: Error) =>
                     console.error("Error handling reservation expiry:", err.message)
                 );
             }).catch((err: Error) => console.error("Import error:", err.message));

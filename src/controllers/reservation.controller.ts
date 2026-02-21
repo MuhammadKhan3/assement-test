@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from "express";
-import * as reservationService from "../services/reservation.service";
+import { ReservationService } from "../services/reservation.service";
+
+const reservationService = new ReservationService();
 
 /**
  * POST /api/reservations/reserve

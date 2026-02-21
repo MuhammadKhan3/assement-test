@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import Repository from "./repository";
 
-class OrderRepository extends Repository {
+export class OrderRepository extends Repository {
     constructor() {
         super(Prisma.ModelName.Order);
     }
@@ -23,5 +23,3 @@ class OrderRepository extends Repository {
         return result?.[0]?._sum?.quantity ?? 0;
     }
 }
-
-export const orderRepository = new OrderRepository();

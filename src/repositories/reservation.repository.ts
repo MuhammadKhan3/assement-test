@@ -1,7 +1,7 @@
 import { Prisma, ReservationStatus } from "@prisma/client";
 import Repository from "./repository";
 
-class ReservationRepository extends Repository {
+export class ReservationRepository extends Repository {
     constructor() {
         super(Prisma.ModelName.Reservation);
     }
@@ -34,5 +34,3 @@ class ReservationRepository extends Repository {
         });
     }
 }
-
-export const reservationRepository = new ReservationRepository();

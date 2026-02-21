@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from "express";
-import * as productService from "../services/product.service";
+import { ProductService } from "../services/product.service";
+
+const productService = new ProductService();
 
 /**
  * POST /api/products
@@ -32,7 +34,6 @@ export async function getProductStatus(
     next: NextFunction
 ): Promise<void> {
     try {
-
         const status = await productService.getProductStatus(req.params.id as string);
         res.status(200).json({
             success: true,
